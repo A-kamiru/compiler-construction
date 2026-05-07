@@ -1,0 +1,29 @@
+int compute_math(int a, int b) {
+    int result = a + b * 2;
+    return result;
+}
+
+int main() {
+    int x = 10;
+    int y = 5;
+    char flag; 
+
+    int sum = compute_math(x, y);
+
+    if (sum >= 20) {
+        printf("The sum is large", sum);
+    } else {
+        printf("The sum is small", sum);
+    }
+
+    int counter = 0;
+    while (counter != 3) {
+        counter = counter + 1;
+    }
+
+    for (x = 0; x < 5; x = x + 1) {
+        y = y / 2;
+    }
+
+    return 0;
+}

@@ -1,0 +1,11 @@
+int main() {
+    int x = 7;
+    int y = 3;
+    int z = x + y;
+    if (z > 5) {
+        printf("z is:", z);
+    } else {
+        printf("small:", z);
+    }
+    return z;
+}
