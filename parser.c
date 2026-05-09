@@ -14,6 +14,7 @@ int error_count = 0; // Tracks total errors instead of crashing
 const char* current_context = "program"; // Tracks the active BNF rule
 
 // --- ICG INFRASTRUCTURE ---
+FILE *icg_file;       // Global file pointer for the TAC output
 int temp_count = 0;   // Keeps track of t1, t2, t3...
 
 // Generates a new temporary variable name (e.g., "t1")
@@ -69,7 +70,7 @@ const char* get_token_name(int token) {
     }
 }
 
-// The New Error Reporter
+// The Error Reporter
 void syntax_error(const char* expected_desc) {
     printf("\n\n======================================================\n");
     printf("              🚨 SYNTAX ERROR DETECTED 🚨             \n");
@@ -86,16 +87,12 @@ void syntax_error(const char* expected_desc) {
     error_count++; // Tally the error instead of dying
 }
 
-// PANIC MODE RECOVERY: Finds a safe place to resume parsing
+// PANIC MODE RECOVERY
 void synchronize() {
     printf("    [RECOVERY] Panic Mode! Skipping tokens to find a safe resumption point...\n");
-    
-    // We throw away tokens until we see a semicolon, a closing brace, or End of File
     while (lookahead != ';' && lookahead != '}' && lookahead != 0) {
         lookahead = yylex();
     }
-    
-    // If we stopped on a semicolon, consume it so we can start fresh on the next line
     if (lookahead == ';') {
         lookahead = yylex();
     }
@@ -109,7 +106,7 @@ void match(int expected_token) {
         lookahead = yylex(); 
     } else {
         syntax_error(get_token_name(expected_token));
-        synchronize(); // Trigger Panic Mode Recovery!
+        synchronize(); 
     }
 }
 
@@ -144,7 +141,7 @@ void parse_type() {
     else if (lookahead == CHAR) match(CHAR);
     else {
         syntax_error("type 'int' or 'char'");
-        synchronize(); // <-- Add this!
+        synchronize(); 
     }
 }
 
@@ -183,8 +180,8 @@ void parse_function() {
     match('{');
     
     while (lookahead != '}' && lookahead != 0) {
-    parse_statement();
-}
+        parse_statement();
+    }
     
     match('}');
     indent--;
@@ -229,7 +226,6 @@ void parse_statement() {
         indent++;
         parse_type();
         
-        // Capture the variable name BEFORE we match and consume it!
         char var_name[100];
         strcpy(var_name, yytext); 
         match(IDENTIFIER);
@@ -237,8 +233,7 @@ void parse_statement() {
         if (lookahead == ASSIGN_OP) {
             match(ASSIGN_OP);
             char* expr_result = parse_expression();
-            // Print the final ICG assignment
-            printf("    [ICG] %s = %s\n", var_name, expr_result);
+            fprintf(icg_file, "%s = %s\n", var_name, expr_result); // Write to file
         }
         match(';');
         indent--;
@@ -248,7 +243,6 @@ void parse_statement() {
         print_indent(); printf("ASSIGNMENT_OR_CALL\n");
         indent++;
         
-        // Capture the variable name BEFORE we match it!
         char var_name[100];
         strcpy(var_name, yytext);
         match(IDENTIFIER);
@@ -256,8 +250,7 @@ void parse_statement() {
         if (lookahead == ASSIGN_OP) {
             match(ASSIGN_OP);
             char* expr_result = parse_expression();
-            // Print the final ICG assignment
-            printf("    [ICG] %s = %s\n", var_name, expr_result);
+            fprintf(icg_file, "%s = %s\n", var_name, expr_result); // Write to file
         } else if (lookahead == '(') {
              match('(');
              if (lookahead != ')') {
@@ -268,13 +261,12 @@ void parse_statement() {
                  }
              }
              match(')');
-             // It's a standalone call like printf()
-             printf("    [ICG] CALL %s\n", var_name);
+             fprintf(icg_file, "CALL %s\n", var_name); // Write to file
         }
         match(';');
         indent--;
     }
-} // <-- End of parse_statement()
+}
 
 void parse_while_statement() {
     current_context = "while_statement";
@@ -284,28 +276,23 @@ void parse_while_statement() {
     char* start_label = new_label();
     char* end_label = new_label();
     
-    // Mark the start of the loop
-    printf("    [ICG] LABEL %s:\n", start_label);
+    fprintf(icg_file, "LABEL %s:\n", start_label); // Write to file
     
     match(WHILE);         
     match('(');           
     char* condition = parse_expression();   
     match(')');           
     
-    // If the condition is false, jump out of the loop
-    printf("    [ICG] ifFalse %s goto %s\n", condition, end_label);
+    fprintf(icg_file, "ifFalse %s goto %s\n", condition, end_label); // Write to file
     
     match('{');           
     while (lookahead != '}' && lookahead != 0) {
-    parse_statement();
-}
+        parse_statement();
+    }
     match('}');           
     
-    // Jump back to the start of the loop
-    printf("    [ICG] goto %s\n", start_label);
-    
-    // Mark the end of the loop
-    printf("    [ICG] LABEL %s:\n", end_label);
+    fprintf(icg_file, "goto %s\n", start_label); // Write to file
+    fprintf(icg_file, "LABEL %s:\n", end_label); // Write to file
     indent--;
 }
 
@@ -319,12 +306,10 @@ void parse_if_statement() {
     char* condition = parse_expression(); 
     match(')');
     
-    // Generate our jump labels
     char* else_label = new_label();
     char* end_label = new_label();
     
-    // If the condition is false, jump to the ELSE block
-    printf("    [ICG] ifFalse %s goto %s\n", condition, else_label);
+    fprintf(icg_file, "ifFalse %s goto %s\n", condition, else_label); // Write to file
     
     match('{');
     while (lookahead != '}' && lookahead != 0) {
@@ -332,11 +317,8 @@ void parse_if_statement() {
     }
     match('}');
     
-    // At the end of the true block, jump past the else block
-    printf("    [ICG] goto %s\n", end_label);
-    
-    // Place the ELSE label here
-    printf("    [ICG] LABEL %s:\n", else_label);
+    fprintf(icg_file, "goto %s\n", end_label); // Write to file
+    fprintf(icg_file, "LABEL %s:\n", else_label); // Write to file
     
     if (lookahead == ELSE) {
         print_indent(); printf("ELSE_BLOCK\n");
@@ -350,8 +332,7 @@ void parse_if_statement() {
         indent--;
     }
     
-    // Place the END label here
-    printf("    [ICG] LABEL %s:\n", end_label);
+    fprintf(icg_file, "LABEL %s:\n", end_label); // Write to file
     indent--;
 }
 
@@ -387,29 +368,21 @@ void parse_for_statement() {
 char* parse_expression() {
     current_context = "expression";
     
-    // Get the left side of the math equation
     char* left_side = parse_factor();
     
-    // While there is a math or relational operator...
     while (lookahead == ARITH_OP || lookahead == REL_OP) {
         char op[10];
-        strcpy(op, yytext); // Save the operator (+, -, <, !=, etc.)
+        strcpy(op, yytext); 
         match(lookahead);
         
-        // Get the right side
         char* right_side = parse_factor();
-        
-        // Generate a new temporary variable (t1, t2, etc.)
         char* temp = new_temp();
         
-        // Output the Three-Address Code directly to the terminal!
-        printf("    [ICG] %s = %s %s %s\n", temp, left_side, op, right_side);
+        fprintf(icg_file, "%s = %s %s %s\n", temp, left_side, op, right_side); // Write to file
         
-        // The new left side becomes this temp variable for chained math (e.g., a + b + c)
         strcpy(left_side, temp);
     }
     
-    // Hand the final result variable (like "t1") back up the tree
     return left_side;
 }
 
@@ -420,7 +393,7 @@ char* parse_factor() {
     if (lookahead == NUMBER) {
         print_indent(); printf("NUMBER_LITERAL\n");
         indent++;
-        strcpy(result, yytext); // Capture the actual number (e.g., "5")
+        strcpy(result, yytext); 
         match(NUMBER);
         indent--;
         return result;
@@ -428,7 +401,7 @@ char* parse_factor() {
     else if (lookahead == IDENTIFIER) {
         print_indent(); printf("VARIABLE_OR_CALL\n");
         indent++;
-        strcpy(result, yytext); // Capture the variable name (e.g., "x")
+        strcpy(result, yytext); 
         match(IDENTIFIER);
         
         if (lookahead == '(') {
@@ -442,9 +415,8 @@ char* parse_factor() {
             }
             match(')');
             
-            // If it was a function call, put the return value in a temp
             char* temp = new_temp();
-            printf("    [ICG] %s = CALL %s\n", temp, result);
+            fprintf(icg_file, "%s = CALL %s\n", temp, result); // Write to file
             indent--;
             return temp;
         }
@@ -460,7 +432,7 @@ char* parse_factor() {
     else {
         syntax_error("NUMBER, IDENTIFIER, or '('");
         synchronize();         
-        strcpy(result, "ERROR"); // <-- Safe, writable memory
+        strcpy(result, "ERROR"); 
         return result;           
     }
 }
@@ -474,6 +446,13 @@ int main(int argc, char **argv) {
         }
     } else {
         printf("Usage: ./compiler sample.mini\n");
+        return 1;
+    }
+    
+    // Open the ICG output file
+    icg_file = fopen("output.tac", "w");
+    if (!icg_file) {
+        printf("Error: Could not create output.tac file.\n");
         return 1;
     }
     
@@ -494,7 +473,7 @@ int main(int argc, char **argv) {
     yyrestart(yyin);
     line_num = 1;
 
-    // --- STAGE 2: PARSE TREE GENERATION ---
+    // --- STAGE 2: SYNTAX ANALYSIS ---
     printf("\n======================================================\n");
     printf("              STAGE 2: SYNTAX ANALYSIS                \n");
     printf("======================================================\n");
@@ -502,12 +481,17 @@ int main(int argc, char **argv) {
     lookahead = yylex(); 
     parse_program();
     
+    // --- STAGE 3: ICG COMPLETION ---
+    fclose(icg_file); // Close the file safely
+    
     // --- COMPILATION SUMMARY ---
     printf("\n======================================================\n");
     if (error_count == 0) {
         printf("       ✅ COMPILATION SUCCESSFUL (0 Errors)           \n");
+        printf("       📄 ICG saved successfully to 'output.tac'      \n");
     } else {
         printf("       ❌ COMPILATION FAILED (%d Syntax Errors found) \n", error_count);
+        printf("       ⚠️ ICG generation incomplete due to errors     \n");
     }
     printf("======================================================\n\n");
     
